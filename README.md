@@ -1,7 +1,3 @@
-Perfect — thanks for clarifying. Here’s your updated and **final clean README** version reflecting your current project state:
-(no `models/` folder, only `models_scratch/` exists).
-
----
 
 # LM-Corpus-Effects
 
@@ -10,8 +6,8 @@ Exploring the Effect of Training Data on BERT's Generalization
 This project investigates how different training corpora affect a language model’s ability to generalize and predict missing or next words.
 It trains and evaluates BERT-style models (from scratch) using:
 
-* A full corpus (corpus_original.txt) containing a few hundred short documents across diverse topics.
-* A filtered corpus (corpus_filtered.txt) which is the same dataset but with specific keywords and topics removed, such as geography, sports, and technology.
+* A full corpus (`corpus_original.txt`) containing a few hundred short documents across diverse topics.
+* A filtered corpus (`corpus_filtered.txt`) which is the same dataset but with specific keywords and topics removed, such as geography, sports, and technology.
 
 The experiment is based on the idea of Filtered Corpus Training (FiCT), which studies how removing linguistic evidence from the training data changes model performance on unseen prompts.
 
@@ -35,12 +31,12 @@ lm-corpus-effects/
 │   ├── eval.txt
 │   ├── nextword_eval.txt
 │   ├── nextword_answers.tsv
-│   └── README.md
+│   
 │
 ├── ds/
-│   ├── corpus_original/          # Tokenized dataset caches
-│   ├── corpus_filtered/          # Filtered dataset splits
-│   └── eval/                     # Evaluation datasets
+│   ├── corpus_original/
+│   ├── corpus_filtered/
+│   └── eval/
 │
 ├── models_scratch/
 │   ├── corpus_original_tiny/
@@ -50,7 +46,7 @@ lm-corpus-effects/
 │   ├── data/
 │   │   ├── make_corpora.py
 │   │   ├── prepare_dataset.py
-│   │   ├── train_tokenizer.py
+│   │   └── train_tokenizer.py
 │   │
 │   ├── train/
 │   │   └── train_bert_scratch.py
@@ -90,11 +86,11 @@ Stores the tokenizer vocabulary and configuration used for all scratch-trained m
 
 Data Overview
 
-corpus_original.txt - Full training corpus (~600 short documents).
-corpus_filtered.txt - Filtered version (~530 documents) with targeted keywords removed.
-eval.txt - Handwritten fill-in-the-blank prompts for manual evaluation.
-nextword_eval.txt - Automatically generated next-word prediction prompts.
-nextword_answers.tsv - Gold-standard answers for next-word evaluation.
+corpus_original.txt – Full training corpus (~600 short documents).
+corpus_filtered.txt – Filtered version (~530 documents) with targeted keywords removed.
+eval.txt – Handwritten fill-in-the-blank prompts for manual evaluation.
+nextword_eval.txt – Automatically generated next-word prediction prompts.
+nextword_answers.tsv – Gold-standard answers for next-word evaluation.
 
 ---
 
@@ -102,10 +98,9 @@ Code Components
 
 src/data/
 
-* make_corpora.py: Builds the original and filtered corpora from public datasets, cleans text, and removes unwanted keywords.
-* prepare_dataset.py(Optional/not used): Converts text data into tokenized Hugging Face Dataset objects for efficient training. // not used anymore
-* train_tokenizer.py(Optional/not used): Trains or loads a BertTokenizerFast vocabulary shared across all experiments. // not used anymore
-// train_bert_scratch does everything inline it uses bert-base-uncased tokenizer, tokenizes the text dynamically via build datasets
+* make_corpora.py: Builds and cleans the original and filtered corpora, removing selected keywords and saving the final text datasets.
+* prepare_dataset.py: (Optional / not currently used) Converts text files into pre-tokenized Hugging Face Dataset objects. Kept for possible future use.
+* train_tokenizer.py: (Optional / not currently used) Trains a new tokenizer vocabulary from the small corpus; currently the pretrained “bert-base-uncased” tokenizer is reused instead.
 
 src/train/
 
@@ -119,44 +114,116 @@ src/eval/
 
 ---
 
+How to Run Each File
+
+1. Build the corpora
+
+   ```
+   python src/data/make_corpora.py
+   ```
+
+   Creates two small text datasets:
+
+   * data/corpus_original.txt (full)
+   * data/corpus_filtered.txt (filtered)
+     You can optionally specify output paths with --out_original and --out_filtered.
+
+2. Train a model from scratch
+
+   ```
+   python src/train/train_bert_scratch.py data/corpus_original.txt models_scratch/corpus_original_tiny --epochs 8 --batch_size 16 --max_length 128
+   ```
+
+   Trains a small BERT model from random initialization on your corpus and saves it under models_scratch/corpus_original_tiny.
+
+   Key parts:
+
+   * data/corpus_original.txt – input corpus
+   * models_scratch/corpus_original_tiny – output model directory
+   * --epochs – number of training passes
+   * --batch_size – examples per training step
+   * --max_length – maximum token sequence length
+
+   To train on the filtered version:
+
+   ```
+   python src/train/train_bert_scratch.py data/corpus_filtered.txt models_scratch/corpus_filtered_tiny
+   ```
+
+3. Evaluate fill-in-the-blank predictions
+
+   ```
+   python src/eval/eval_bert.py models_scratch/corpus_original_tiny
+   ```
+
+   Loads the trained model and predicts the best word for each [MASK] token in data/eval.txt.
+   The output lists the top-5 predictions with their probabilities.
+
+   For the filtered model:
+
+   ```
+   python src/eval/eval_bert.py models_scratch/corpus_filtered_tiny
+   ```
+
+4. Create next-word evaluation set
+
+   ```
+   python src/eval/make_nextword_eval.py data/corpus_original.txt --out_prompts data/nextword_eval.txt --out_answers data/nextword_answers.tsv --max_items 500
+   ```
+
+   Generates 500 short sentence fragments ending with [MASK], plus the correct next words.
+
+   Key parts:
+
+   * --out_prompts – output prompt file
+   * --out_answers – file with correct next words
+   * --max_items – number of examples to create
+
+5. Score next-word prediction accuracy
+
+   ```
+   python src/eval/score_nextword_bert.py models_scratch/corpus_original_tiny data/nextword_eval.txt data/nextword_answers.tsv
+   ```
+
+   Evaluates how often the model predicts the correct next word.
+
+   Outputs:
+
+   * acc@1 – percent of correct top predictions
+   * acc@5 – percent correct within top five guesses
+   * avg_gold_prob – average model confidence in the correct answer
+
+   For the filtered model:
+
+   ```
+   python src/eval/score_nextword_bert.py models_scratch/corpus_filtered_tiny data/nextword_eval.txt data/nextword_answers.tsv
+   ```
+
+---
+
 Metrics Explained
 
-acc@1 - The percentage of prompts where the model’s top prediction matches the correct next word.
-acc@5 - The percentage where the correct word appears in the model’s top five predictions.
-avg_gold_prob - The average probability the model assigns to the correct next word across all prompts.
+acc@1 – The percentage of prompts where the model’s top prediction matches the correct next word.
+acc@5 – The percentage where the correct word appears in the top five predictions.
+avg_gold_prob – The average probability the model assigns to the correct next word across all prompts.
 
 ---
 
-Evaluation Workflow
+Evaluation Workflow Summary
 
-1. Build corpora:
-   python src/data/make_corpora.py
-
-2. Train models from scratch:
-   python src/train/train_bert_scratch.py data/corpus_original.txt models_scratch/corpus_original_tiny
-   python src/train/train_bert_scratch.py data/corpus_filtered.txt models_scratch/corpus_filtered_tiny
-
-3. Evaluate fill-in-the-blank predictions:
-   python src/eval/eval_bert.py models_scratch/corpus_original_tiny
-   python src/eval/eval_bert.py models_scratch/corpus_filtered_tiny
-
-** Ask Professor Lin 
-
-4. Evaluate next-word prediction:
-   python src/eval/make_nextword_eval.py data/corpus_original.txt --out_prompts data/nextword_eval.txt --out_answers data/nextword_answers.tsv --max_items 500
-   python src/eval/score_nextword_bert.py models_scratch/corpus_original_tiny data/nextword_eval.txt data/nextword_answers.tsv
-   python src/eval/score_nextword_bert.py models_scratch/corpus_filtered_tiny data/nextword_eval.txt data/nextword_answers.tsv
+1. Run make_corpora.py to create training corpora.
+2. Train both models with train_bert_scratch.py.
+3. Evaluate fill-in-the-blank predictions using eval_bert.py.
+4. Generate and score next-word tasks using make_nextword_eval.py and score_nextword_bert.py.
+5. Compare results between the original and filtered models.
 
 ---
 
-Interpreting the Results
+Interpreting Results
 
 These models are trained on very small datasets and are not expected to perform well in absolute accuracy.
-The goal is not to achieve state-of-the-art performance, but to compare how the filtered corpus affects model behavior and generalization.
-
-A well-trained model on corpus_original will typically show slightly higher next-word and masked-word accuracy than the filtered version, especially on prompts related to the removed topics.
-
-This demonstrates the concept that linguistic coverage and context in training data directly influence model generalization ability.
+The goal is not to achieve high scores but to compare how the filtered corpus affects the model’s behavior and generalization.
+The model trained on corpus_original usually performs slightly better on prompts involving removed topics, confirming the influence of training data coverage on generalization.
 
 ---
 
@@ -165,16 +232,16 @@ Next Steps
 1. Expand or rebalance the corpus to test larger or more selective filters.
 2. Visualize vocabulary overlap and token distributions between corpora.
 3. Add quantitative plots comparing acc@1 and acc@5 between models.
-4. Experiment with training durations, batch sizes, or masking probabilities.
+4. Experiment with different masking probabilities or architectures.
 5. Document qualitative examples showing how predictions differ by corpus.
 
 ---
 
-Maintainer: Erick Mainoo , Alex Geer, Mollie Hamman
-Course: CS 5/7330 - Natural Language Processing, Fall 2025
+Maintainers: Mollie Hamman, Alex Geer, Erick Mainoo
+Course: CS 5/7322 – Natural Language Processing, Fall 2025
 Institution: Southern Methodist University (SMU), Dallas TX
 Last Updated: October 2025
 
 ---
 
-**short 150-word project summary paragraph** 
+ short 1-paragraph “Abstract / Project Summary”
