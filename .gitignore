@@ -1,0 +1,26 @@
+# virtual envs
+.venv/
+venv/
+
+# python cruft
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.ipynb_checkpoints/
+.pytest_cache/
+
+# model/data artifacts
+models_scratch/
+ds/
+out/
+*.pt
+*.bin
+*.safetensors
+*.ckpt
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

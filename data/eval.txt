@@ -1,0 +1,15 @@
+paris is the capital of [MASK].
+the capital of france is [MASK].
+madrid is the capital of [MASK].
+the company announced an [MASK] of new shares.
+google prepared an [MASK] to sell stock.
+oil prices rose after [MASK] in the gulf.
+the team scored a [MASK] in the final minute.
+the coach praised the [MASK] after the win.
+fighting resumed in [MASK] overnight.
+talks were held in [MASK] to reach a ceasefire.
+the storm is expected to make [MASK] tonight.
+investors reacted to weak [MASK] data.
+the court upheld the [MASK] on appeal.
+the minister resigned after a political [MASK].
+
