@@ -20,50 +20,6 @@ Project Goals
 3. Evaluate their performance on masked word and next-word prediction tasks.
 4. Analyze how filtering affects generalization, accuracy, and prediction diversity.
 
----
-
-Repository Structure
-
-lm-corpus-effects/
-├── data/
-│   ├── corpus_original.txt
-│   ├── corpus_filtered.txt
-│   ├── eval.txt
-│   ├── nextword_eval.txt
-│   ├── nextword_answers.tsv
-│   
-│
-├── ds/
-│   ├── corpus_original/
-│   ├── corpus_filtered/
-│   └── eval/
-│
-├── models_scratch/
-│   ├── corpus_original_tiny/
-│   └── corpus_filtered_tiny/
-│
-├── src/
-│   ├── data/
-│   │   ├── make_corpora.py
-│   │   ├── prepare_dataset.py
-│   │   └── train_tokenizer.py
-│   │
-│   ├── train/
-│   │   └── train_bert_scratch.py
-│   │
-│   └── eval/
-│       ├── eval_bert.py
-│       ├── make_nextword_eval.py
-│       └── score_nextword_bert.py
-│
-├── tokenizer/
-│   ├── vocab.txt
-│   ├── tokenizer_config.json
-│   └── special_tokens_map.json
-│
-├── requirements.txt
-├── tiny_bert_config.json
-└── README.md
 
 ---
 
