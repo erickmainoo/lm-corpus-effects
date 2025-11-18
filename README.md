@@ -19,8 +19,6 @@ Project Goals
 2. Train small BERT models from scratch on both corpora.
 3. Evaluate their performance on masked word and next-word prediction tasks.
 4. Analyze how filtering affects generalization, accuracy, and prediction diversity.
-
-
 ---
 
 Folder Overview

@@ -1,0 +1,5 @@
+dataset=ag_news
+size_per_corpus=10000
+withheld_label=1 (Sports)
+overlap_docs=7551/10000 (75.5%)
+files=corpus_original.txt, corpus_filtered.txt, eval.txt, DIFF_REPORT.txt

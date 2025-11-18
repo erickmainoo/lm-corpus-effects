@@ -1,0 +1,55 @@
+{
+  "model": "bert-base-uncased",
+  "device": "mps",
+  "train_lines": 10000,
+  "eval_lines": 8,
+  "epochs": 1,
+  "batch_size": 16,
+  "learning_rate": 5e-05,
+  "mlm_probability": 0.15,
+  "max_len": 128,
+  "epoch_times_sec": [
+    366.01
+  ],
+  "total_time_sec": 366.08,
+  "eval_loss": 1.2534003257751465,
+  "approx_tokens_trained": 528233,
+  "tokens_per_sec": 1442.9,
+  "samples": {
+    "the economy is showing signs of [MASK].": [
+      "growth",
+      "recovery",
+      "progress",
+      "improvement",
+      "change"
+    ],
+    "scientists discovered a new [MASK] for treatment.": [
+      "drug",
+      "method",
+      "technology",
+      "solution",
+      "protocol"
+    ],
+    "the company reported a quarterly [MASK].": [
+      "profit",
+      "growth",
+      "decline",
+      "revenue",
+      "income"
+    ],
+    "officials met to discuss international [MASK].": [
+      "issues",
+      "trade",
+      "relations",
+      "affairs",
+      "developments"
+    ],
+    "the team secured a decisive [MASK] in the final.": [
+      "victory",
+      "win",
+      "spot",
+      "place",
+      "position"
+    ]
+  }
+}
