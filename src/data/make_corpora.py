@@ -1,5 +1,20 @@
-# src/data/make_corpora.py
-import os, re, random, unicodedata, sys
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+make_corpora.py
+Builds paired corpora from AG News:
+ - corpus_original.txt  : N docs (mixed topics)
+ - corpus_filtered.txt  : N docs, identical except all docs from the withheld topic are removed,
+                          then topped up with non-withheld docs to keep size equal.
+Also writes:
+ - eval.txt             : generic + withheld-topic prompts for masked LM
+ - CORPUS_MANIFEST.txt  : provenance, sizes, overlap
+ - DIFF_REPORT.txt      : which lines were removed/added (by text)
+"""
+
+import argparse
+import random
+import sys
 from pathlib import Path
 
 try:
@@ -8,125 +23,170 @@ except Exception as e:
     print(f"[ERROR] Could not import datasets: {e}", file=sys.stderr)
     sys.exit(1)
 
-random.seed(42)
+LABEL2NAME = {0: "World", 1: "Sports", 2: "Business", 3: "Sci/Tech"}
 
-# --- Resolve OUT_DIR relative to this file (not the shell's CWD) ---
-HERE = Path(__file__).resolve().parent
-OUT_DIR = (HERE / "../../data").resolve()  # adjust if you want sibling to repo root
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-print(f"[INFO] OUT_DIR = {OUT_DIR}")
+# ------------------------------ utils ------------------------------
 
-def safe_len(x):
-    try:
-        return len(x)
-    except Exception:
-        return -1
+def write_lines(path: Path, lines):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for t in lines:
+            # keep one line per doc
+            f.write(t.replace("\n", " ").strip() + "\n")
 
-def fetch(name, builder=None, split=None, field=None, slice_hint=""):
-    """Load a split, extract a text field; never crash the whole script."""
-    try:
-        if builder is None:
-            ds = load_dataset(name, split=split)
-        else:
-            ds = load_dataset(name, builder, split=split)
-        n = safe_len(ds)
-        print(f"[OK] Loaded {name}{'/' + str(builder) if builder else ''} {slice_hint} -> {n} rows")
-        items = []
-        for x in ds:
-            val = x.get(field, "")
-            if isinstance(val, str) and val.strip():
-                items.append(val)
-        print(f"[OK] Extracted {len(items)} '{field}' strings from {name}")
-        return items
-    except Exception as e:
-        print(f"[WARN] Skipping {name} ({builder or ''}) {slice_hint}: {e}")
-        return []
+def load_ag_news_shuffled(seed: int, oversample_factor: float = 2.0):
+    """Load AG News train split, return shuffled list of dicts: {'text', 'label'}."""
+    ds = load_dataset("ag_news", split="train")
+    rows = [{"text": r["text"].strip(), "label": int(r["label"])} for r in ds if r["text"].strip()]
+    rng = random.Random(seed)
+    rng.shuffle(rows)
+    return rows
 
-# ---- 1) Load small slices from multiple sources ----
-sources = []
+def take_front(rows, n):
+    if len(rows) < n:
+        raise ValueError(f"Need at least {n} rows, have {len(rows)}")
+    return rows[:n]
 
-# Wikipedia-like
-sources += fetch("wikitext", builder="wikitext-2-raw-v1",
-                 split="train[:3%]", field="text", slice_hint="train[:3%]")
+def paired_corpora(rows, size, withhold_label, seed):
+    """
+    Build paired corpora of equal size:
+      - original: first N from shuffled rows
+      - filtered: original minus withheld-topic docs, then top-up from remainder (non-withheld, not already used)
+    Returns (original_rows, filtered_rows, overlap_count).
+    """
+    rng = random.Random(seed)
 
-# News (AG News)
-sources += fetch("ag_news", split="train[:3%]", field="text", slice_hint="train[:3%]")
+    # 1) Choose ORIGINAL as the first N examples from shuffled rows (deterministic)
+    original = take_front(rows, size)
 
-# Summaries / News articles
-sources += fetch("cnn_dailymail", builder="3.0.0",
-                 split="train[:1%]", field="article", slice_hint="train[:1%]")
+    # 2) FILTERED: keep non-withheld from ORIGINAL
+    kept = [r for r in original if r["label"] != withhold_label]
 
-# Books (open)
-sources += fetch("bookcorpusopen", split="train[:1%]", field="text", slice_hint="train[:1%]")
+    # 3) TOP-UP: scan the remainder and add non-withheld rows until size reached, no duplicates by text
+    remainder = rows[size:]
+    used = set(r["text"] for r in kept)  # avoid dup text lines
+    filtered = list(kept)
+    for r in remainder:
+        if r["label"] == withhold_label:
+            continue
+        if r["text"] in used:
+            continue
+        filtered.append(r)
+        used.add(r["text"])
+        if len(filtered) >= size:
+            break
 
-print(f"[INFO] Total raw strings before cleaning: {len(sources)}")
+    if len(filtered) < size:
+        raise ValueError(
+            f"Cannot build filtered corpus of size {size}: not enough non-withheld docs "
+            f"(withheld={LABEL2NAME[withhold_label]}). Try a smaller --size or a different topic."
+        )
 
-# ---- 2) Clean & normalize into short “documents” (paragraphish) ----
-def normalize(txt: str) -> str:
-    t = unicodedata.normalize("NFC", txt)
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
+    # 4) Overlap reporting
+    o_texts = set(r["text"] for r in original)
+    f_texts = set(r["text"] for r in filtered)
+    overlap = len(o_texts & f_texts)
 
-docs = [normalize(t) for t in sources if isinstance(t, str)]
-print(f"[INFO] After normalize: {len(docs)}")
+    return original, filtered, overlap
 
-# Filter out too-short/too-long
-docs = [d for d in docs if 50 <= len(d) <= 600]
-print(f"[INFO] After length filter (50..600): {len(docs)}")
+def make_eval_prompts(withheld_label: int):
+    generic = [
+        "the economy is showing signs of [MASK].",
+        "scientists discovered a new [MASK] for treatment.",
+        "the company reported a quarterly [MASK].",
+        "officials met to discuss international [MASK].",
+    ]
+    sports = [
+        "the team secured a decisive [MASK] in the final.",
+        "the coach praised the players' [MASK] after the match.",
+        "she scored the winning [MASK] in overtime.",
+        "the league announced a new [MASK] policy.",
+    ]
+    world = [
+        "leaders signed a historic [MASK] agreement.",
+        "protests erupted in the capital [MASK].",
+    ]
+    business = [
+        "shares surged after the [MASK] announcement.",
+        "the merger is expected to [MASK] revenue.",
+    ]
+    scitech = [
+        "researchers unveiled a breakthrough [MASK] device.",
+        "engineers improved battery [MASK] significantly.",
+    ]
 
-# Deduplicate & shuffle
-before_dedup = len(docs)
-docs = list(dict.fromkeys(docs))
-print(f"[INFO] Dedup removed {before_dedup - len(docs)} duplicates; remaining {len(docs)}")
-random.shuffle(docs)
+    topic_block = {
+        0: world,
+        1: sports,
+        2: business,
+        3: scitech,
+    }.get(withheld_label, [])
+    return generic + topic_block
 
-# Cap to a few hundred docs (adjust if you want)
-TARGET = 600
-docs = docs[:TARGET]
-print(f"[INFO] Using {len(docs)} docs for corpus_original")
+# ------------------------------ main ------------------------------
 
-if not docs:
-    print("[ERROR] No documents passed filters. Loosen length filter or increase dataset slice.")
-    sys.exit(2)
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--size", type=int, default=1000, help="documents per corpus (original and filtered)")
+    ap.add_argument("--withhold_label", type=int, default=1, choices=[0, 1, 2, 3],
+                    help="AG News topic to withhold: 0=World, 1=Sports, 2=Business, 3=Sci/Tech")
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--out_dir", type=str,
+                    default=str((Path(__file__).resolve().parents[2] / "data")))
+    args = ap.parse_args()
 
-# ---- 3) Save original corpus ----
-orig_path = OUT_DIR / "corpus_original.txt"
-with orig_path.open("w", encoding="utf-8") as f:
-    for d in docs:
-        f.write(d + "\n")
-print(f"✅ Wrote {len(docs)} docs to {orig_path} (size={orig_path.stat().st_size} bytes)")
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-# ---- 4) Make a filtered corpus (remove certain keywords) ----
-KEYWORDS = [
-    # geography
-    "france", "paris", "eiffel", "louvre",
-    # sports
-    "soccer", "football", "team", "goal", "score",
-    # tech
-    "neural", "network", "machine learning", "algorithm", "data",
-]
-kw_re = re.compile("|".join(re.escape(k) for k in KEYWORDS), re.IGNORECASE)
+    print(f"[INFO] Dataset: AG News | size={args.size} | withhold={LABEL2NAME[args.withhold_label]} | seed={args.seed}")
+    rows = load_ag_news_shuffled(args.seed)
 
-filtered = [d for d in docs if not kw_re.search(d)]
-print(f"[INFO] Filtered out {len(docs) - len(filtered)} docs "
-      f"({(1 - len(filtered)/len(docs))*100:.1f}% removed)")
+    original_rows, filtered_rows, overlap = paired_corpora(
+        rows=rows, size=args.size, withhold_label=args.withhold_label, seed=args.seed
+    )
 
-fil_path = OUT_DIR / "corpus_filtered.txt"
-with fil_path.open("w", encoding="utf-8") as f:
-    for d in filtered:
-        f.write(d + "\n")
-print(f"✅ Wrote {len(filtered)} docs to {fil_path} (size={fil_path.stat().st_size} bytes)")
+    corpus_original = [r["text"] for r in original_rows]
+    corpus_filtered = [r["text"] for r in filtered_rows]
 
-# ---- 5) Tiny eval prompts you can expand later ----
-eval_lines = [
-    "paris is the capital of [MASK].",
-    "the capital of france is [MASK].",
-    "neural networks can learn from [MASK].",
-    "databases help manage [MASK].",
-    "the team scored a [MASK].",
-]
-eval_path = OUT_DIR / "eval.txt"
-with eval_path.open("w", encoding="utf-8") as f:
-    for l in eval_lines:
-        f.write(l + "\n")
-print(f"✅ Wrote eval prompts to {eval_path} (size={eval_path.stat().st_size} bytes)")
+    # Write corpora
+    orig_path = out_dir / "corpus_original.txt"
+    fil_path  = out_dir / "corpus_filtered.txt"
+    write_lines(orig_path, corpus_original)
+    write_lines(fil_path, corpus_filtered)
+
+    # Eval prompts (generic + withheld-topic)
+    eval_prompts = make_eval_prompts(args.withhold_label)
+    eval_path = out_dir / "eval.txt"
+    write_lines(eval_path, eval_prompts)
+
+    # Manifest + Diff report
+    manifest = out_dir / "CORPUS_MANIFEST.txt"
+    overlap_pct = 100.0 * overlap / args.size
+    with manifest.open("w", encoding="utf-8") as f:
+        f.write(f"dataset=ag_news\n")
+        f.write(f"size_per_corpus={args.size}\n")
+        f.write(f"withheld_label={args.withhold_label} ({LABEL2NAME[args.withhold_label]})\n")
+        f.write(f"overlap_docs={overlap}/{args.size} ({overlap_pct:.1f}%)\n")
+        f.write("files=corpus_original.txt, corpus_filtered.txt, eval.txt, DIFF_REPORT.txt\n")
+
+    diff_report = out_dir / "DIFF_REPORT.txt"
+    o_set = set(corpus_original); f_set = set(corpus_filtered)
+    removed = sorted(o_set - f_set)  # present in original but not in filtered (likely withheld topic)
+    added   = sorted(f_set - o_set)  # present in filtered but not in original (top-ups)
+    with diff_report.open("w", encoding="utf-8") as f:
+        f.write(f"# Removed from original (likely withheld topic = {LABEL2NAME[args.withhold_label]}): {len(removed)}\n")
+        for ln in removed[:1000]:
+            f.write(f"- {ln}\n")
+        f.write(f"\n# Added to filtered (non-withheld top-ups): {len(added)}\n")
+        for ln in added[:1000]:
+            f.write(f"+ {ln}\n")
+
+    print(f"✅ Wrote: {orig_path}")
+    print(f"✅ Wrote: {fil_path}")
+    print(f"✅ Wrote: {eval_path}")
+    print(f"ℹ️  Overlap original↔filtered: {overlap}/{args.size} ({overlap_pct:.1f}%)")
+    print(f"🧾 Manifest: {manifest}")
+    print(f"🪪 Diff: {diff_report}")
+
+if __name__ == "__main__":
+    main()
